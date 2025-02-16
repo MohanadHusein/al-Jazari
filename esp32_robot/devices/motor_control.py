@@ -1,10 +1,24 @@
 from machine import Pin, PWM, Timer
 import time
+import math
+
 class MotorControl:
     def __init__(self):
-        self.pwm_freq = 20000 #20KHz
-        self.max_pwm_val = 512
+        self.pwm_freq = 1000 #20KHz
+        self.max_pwm_val = 850
         self.min_pwm_val = 0
+        self.encoder_PPR = 1320 # output shaft PPR (11PPR * 30 gear ratio * 4 quadrature encoders rise & fall)
+        self.wheels_radius = 0.04 # m
+        self.wheels_circumference = 2 * math.pi * self.wheels_radius
+        self.encoder_timer_interval = 100 # millisecond
+        self.encoder_timer_interval_s = self.encoder_timer_interval / 1000 # convert to seconds
+        self.right_linear_velocity_readings = []
+        self.left_linear_velocity_readings = []
+        self.linear_velocity_window_size = 10
+        self.right_linear_velocity = 0
+        self.left_linear_velocity = 0
+        self.robot_linear_velocity = 0
+
 
         # configuring PWM and digital pin for left motor wheels
         self.pwm_left = PWM(Pin(25), freq=self.pwm_freq, duty=125)
@@ -20,9 +34,10 @@ class MotorControl:
         self.BIN1_right.off()
         self.BIN2_right.off()
 
+        print('configuring right wheel encoders pins')
         # configuring right wheel encoders pins
-        self.encoder_right_1 = Pin(27, Pin.IN)
-        self.encoder_right_2 = Pin(16, Pin.IN)
+        self.encoder_right_1 = Pin(27, Pin.IN, Pin.PULL_UP)
+        self.encoder_right_2 = Pin(16, Pin.IN, Pin.PULL_UP)
 
         print('configuring right wheel encoders pins interrupt')
         # configuring right wheel encoders pins interrupt
@@ -31,8 +46,8 @@ class MotorControl:
 
         print('configuring left wheel encoders pins')
         # configuring left wheel encoders pins
-        self.encoder_left_1 = Pin(34, Pin.IN)
-        self.encoder_left_2 = Pin(35, Pin.IN)
+        self.encoder_left_1 = Pin(34, Pin.IN, Pin.PULL_UP)
+        self.encoder_left_2 = Pin(35, Pin.IN, Pin.PULL_UP)
 
         print('configuring left wheel encoders pins interrupt')
         # configuring left wheel encoders pins interrupt
@@ -47,38 +62,34 @@ class MotorControl:
         #configuring hardware timer 0 to trigger every 100ms
         print('configuring hardware timer 0 to trigger every 100ms')
         encoder_timer = Timer(0)
-        encoder_timer.init(period=100, mode=Timer.PERIODIC, callback=self.reset_encoders_counter)
+        encoder_timer.init(period=self.encoder_timer_interval, mode=Timer.PERIODIC, callback=self.reset_encoders_counter)
 
         print('finished initializing')
+        self.test_run()
 
-        # self.set_motors_direction('left', 'forward')
-        # self.set_motors_direction('right', 'forward')
-        # self.set_motors_pwm('left', 150)
-        # self.set_motors_pwm('right', 150)
-        # time.sleep(5)
-        # self.set_motors_pwm('left', 200)
-        # self.set_motors_pwm('right', 200)
-        # time.sleep(5)
-        # self.set_motors_pwm('left', 250)
-        # self.set_motors_pwm('right', 250)
-        # time.sleep(5)
-        # self.set_motors_pwm('left', 300)
-        # self.set_motors_pwm('right', 300)
-        #
-        # time.sleep(5)
-        # self.set_motors_pwm('left', 350)
-        # self.set_motors_pwm('right', 350)
-        #
-        # time.sleep(5)
-        # self.set_motors_pwm('left', 400)
-        # self.set_motors_pwm('right', 400)
-        #
-        # time.sleep(5)
-        # self.stop_all_motors()
+        #from devices.motor_control import MotorControl
+
+    def test_run(self):
+        self.set_motors_direction('left', 'forward')
+        self.set_motors_direction('right', 'forward')
+        for pwm in range(100, 600, 50):
+            print(pwm)
+            self.set_motors_pwm('left', pwm)
+            self.set_motors_pwm('right', pwm)
+            time.sleep(5)
+
+        self.stop_all_motors()
 
     def reset_encoders_counter(self, timer):
-        print(f'Right encoder counter {self.right_motors_encoders_counter}, '
-              f'Left encoder counter {self.left_motors_encoders_counter}')
+        temp_right_linear_velocity = self.calculate_linear_velocity(self.right_motors_encoders_counter)
+        temp_left_linear_velocity = self.calculate_linear_velocity(self.left_motors_encoders_counter)
+
+        self.right_linear_velocity = self.calculate_moving_average(self.right_linear_velocity_readings, temp_right_linear_velocity)
+        self.left_linear_velocity = self.calculate_moving_average(self.left_linear_velocity_readings, temp_left_linear_velocity)
+
+        print(f'Right encoder counter {self.right_linear_velocity} , '
+              f'Left encoder counter  {self.left_linear_velocity}  ')
+
         self.right_motors_encoders_counter = 0
         self.left_motors_encoders_counter = 0
 
@@ -112,15 +123,32 @@ class MotorControl:
         self.BIN2_right.off()
         self.AIN1_left.off()
         self.AIN2_left.off()
+        self.set_motors_pwm('right', 0)
+        self.set_motors_pwm('left', 0)
 
-    def set_angular_velocity(self):
-        pass
+    def calculate_linear_velocity(self, encoder_counts):
+        linear_displacement = self.wheels_circumference * (encoder_counts / self.encoder_PPR)
+        linear_velocity = linear_displacement / self.encoder_timer_interval_s
+        return linear_velocity
+
+    def calculate_moving_average(self, linear_velocity_list, current_linear_velocity_measurement):
+        linear_velocity_list.append(current_linear_velocity_measurement)
+        if len(linear_velocity_list) > self.linear_velocity_window_size:
+            linear_velocity_list.pop(0)
+
+        return round(sum(linear_velocity_list) / len(linear_velocity_list), 2)
 
     def set_linear_velocity(self):
         pass
 
-    def read_encoders(self):
+
+    def set_angular_velocity(self):
         pass
+
+
+
+
+
 
 
         # pwm pins
@@ -129,3 +157,5 @@ class MotorControl:
 
         # configure all gpios for encoder reading and motor driver
         # write functions for calculating linear and angular velocity
+
+

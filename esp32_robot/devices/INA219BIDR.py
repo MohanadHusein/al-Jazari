@@ -5,16 +5,26 @@ class INA219BIDR:
     POWER_MONITOR_I2C_ADDR = 0x42 # I2C address of the power monitor IC
     BUS_VOLTAGE_REG = 0x02 # bus voltage measurement register address
     BATT_EMPTY_VOLT = 9.6
-    BATT_FULL_VOLT = 12.6
+    BATT_FULL_VOLT = 12.26
 
     def __init__(self, i2c):
         self.i2c = i2c
+        self.battery_readings = []
+        self.window_size = 10
 
-    def measure_voltage(self):
+    def get_battery_charge(self):
+        voltage_measurement = self.measure_voltage()
+        percentage = round((voltage_measurement - self.BATT_EMPTY_VOLT) / (self.BATT_FULL_VOLT - self.BATT_EMPTY_VOLT) * (100 - 0),2)
+        return [voltage_measurement, percentage]
+
+    def measure_voltage(self): # moving average measurements
         raw_voltage_measurement = self.read_bytes(self.POWER_MONITOR_I2C_ADDR, self.BUS_VOLTAGE_REG, 2)
         voltage_measurement = (int.from_bytes(raw_voltage_measurement) >> 3) * 0.004 # val shifted 3 times and multiplied by 0.004
-        percentage = round((voltage_measurement - self.BATT_EMPTY_VOLT) / (self.BATT_FULL_VOLT - self.BATT_EMPTY_VOLT) * (100 - 0) + 0,2)
-        return [voltage_measurement, percentage]
+        self.battery_readings.append(voltage_measurement)
+        if len(self.battery_readings) > self.window_size:
+            self.battery_readings.pop(0)
+
+        return round(sum(self.battery_readings)/len(self.battery_readings), 2)
 
     def read_bytes(self, address, reg_addr, number_of_bytes):
         return self.i2c.readfrom_mem(address, reg_addr, number_of_bytes)

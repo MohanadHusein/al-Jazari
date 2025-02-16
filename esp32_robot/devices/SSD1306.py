@@ -119,8 +119,8 @@ class SSD1306:
         self.i2c.writeto_mem(self.SSD1306_SCREEN_I2C_ADDR, 0x00, bytes([0x20, 0x00])) # set addressing mode to horizontal
         self.i2c.writeto_mem(self.SSD1306_SCREEN_I2C_ADDR, 0x00, bytes([0x8D, 0x14])) # enable charge pump
         self.i2c.writeto_mem(self.SSD1306_SCREEN_I2C_ADDR, 0x00, bytes([0xAF])) # enable display = on
-        self.i2c.writeto_mem(self.SSD1306_SCREEN_I2C_ADDR, 0x00, bytes([0xA5])) # turn on all pixels of the display - self test
-        time.sleep(1)
+        # self.i2c.writeto_mem(self.SSD1306_SCREEN_I2C_ADDR, 0x00, bytes([0xA5])) # turn on all pixels of the display - self test
+        # time.sleep(1)
         self.i2c.writeto_mem(self.SSD1306_SCREEN_I2C_ADDR, 0x00, bytes([0xA4])) # set reading pixel values from RAM
         self.clear_screen()
 
