@@ -1,7 +1,6 @@
 from machine import I2C, Pin, Timer
-from devices.SSD1306 import SSD1306
-from devices.INA219BIDR import INA219BIDR
-from devices.motor_control import MotorControl
+from SSD1306 import SSD1306
+from INA219BIDR import INA219BIDR
 import time
 
 
