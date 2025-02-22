@@ -16,7 +16,7 @@ class Robot:
 
     def initialize_screen_updates_timer(self):
         screen_timer = Timer(1)
-        screen_timer.init(period=10000, mode=Timer.PERIODIC, callback=self.display_refresh)
+        screen_timer.init(period=30000, mode=Timer.PERIODIC, callback=self.display_refresh)
 
     def display_refresh(self, timer):
         self.battery_charge_level()
