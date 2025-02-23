@@ -11,27 +11,22 @@ class MotorControl:
         self.encoder_PPR = 1320 # output shaft PPR (11PPR * 30 gear ratio * 4 quadrature encoders rise & fall)
         self.wheels_radius = 0.04 # m
         self.wheels_circumference = 2 * math.pi * self.wheels_radius
-        self.encoder_timer_interval = 50 # millisecond
-        self.encoder_timer_interval_s = self.encoder_timer_interval / 1000 # convert to seconds
-
-        self.pid_timer_interval = 50 # millisecond
-        self.pid_timer_interval_s = self.encoder_timer_interval / 1000 # convert to seconds
+        self.velocity_control_timer_interval = 50 # millisecond
+        self.velocity_control_timer_interval_s = self.velocity_control_timer_interval / 1000 # convert to seconds
 
         self.right_linear_velocity_readings = []
         self.left_linear_velocity_readings = []
         self.linear_velocity_window_size = 10
 
-        self.right_linear_velocity = 0
-        self.left_linear_velocity = 0
-        self.robot_linear_velocity = 0
+        self.right_linear_velocity = 0 # m/s
+        self.left_linear_velocity = 0 # m/s
+        self.robot_linear_velocity = 0 # m/s
 
-        self.set_point_right_linear_velocity = 0 #m/s
+        self.set_point_right_linear_velocity = 0 # m/s
+        self.set_point_left_linear_velocity = 0 # m/s
 
-        # self.right_linear_velocity_pid = pid.PIDController(kp=4.3, ki=20, kd=0.50) # best controller so far
-
-        self.right_linear_velocity_pid = pid.PIDController(kp=4.3, ki=20, kd=0.50) # best controller so far
-
-        self.set_point_left_linear_velocity = 0
+        # initializing PID controller for right and left motors
+        self.right_linear_velocity_pid = pid.PIDController(kp=4.3, ki=20, kd=0.50)
         self.left_linear_velocity_pid = pid.PIDController(kp=4.3, ki=20, kd=0.50)
 
         # configuring PWM and digital pin for left motor wheels
@@ -48,27 +43,22 @@ class MotorControl:
         self.BIN1_right.off()
         self.BIN2_right.off()
 
-        print('configuring right wheel encoders pins')
         # configuring right wheel encoders pins
         self.encoder_right_1 = Pin(27, Pin.IN, Pin.PULL_UP)
         self.encoder_right_2 = Pin(16, Pin.IN, Pin.PULL_UP)
 
-        print('configuring right wheel encoders pins interrupt')
         # configuring right wheel encoders pins interrupt
         self.encoder_right_1.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=self.right_motors_encoders_interrupt)
         self.encoder_right_2.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=self.right_motors_encoders_interrupt)
 
-        print('configuring left wheel encoders pins')
         # configuring left wheel encoders pins
         self.encoder_left_1 = Pin(34, Pin.IN, Pin.PULL_UP)
         self.encoder_left_2 = Pin(35, Pin.IN, Pin.PULL_UP)
 
-        print('configuring left wheel encoders pins interrupt')
         # configuring left wheel encoders pins interrupt
         self.encoder_left_1.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=self.left_motors_encoders_interrupt)
         self.encoder_left_2.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=self.left_motors_encoders_interrupt)
 
-        print('init encoder tick counters')
         # init encoder tick counters
         self.right_motors_encoders_counter = 0
         self.left_motors_encoders_counter = 0
@@ -76,65 +66,21 @@ class MotorControl:
         self.right_pwm_from_pid = 0
         self.left_pwm_from_pid = 0
 
+        # reset PIDs initial values
+        self.reset_pid_values()
 
-
-        # reset PIDs
-        #configuring hardware timer 0 to trigger every 100ms
-        print('configuring hardware timer 0 to trigger every 100ms')
-        encoder_timer = Timer(0)
-        encoder_timer.init(period=self.encoder_timer_interval, mode=Timer.PERIODIC, callback=self.reset_encoders_counter)
+        #configuring hardware timer 0 to trigger every 50ms for velocity control
+        velocity_control_timer = Timer(0)
+        velocity_control_timer.init(period=self.velocity_control_timer_interval, mode=Timer.PERIODIC, callback=self.velocity_control)
 
         print('finished initializing')
 
-        self.startup_flag = 1
 
         self.test_run()
 
-        #from motor_control import MotorControl
-
-    def test_run(self):
-        self.stop_all_motors()
-        self.set_motors_direction('left', 'forward')
-        self.set_motors_direction('right', 'forward')
-
-        for speed in [0, 0.1, 0.65, 0.15, 0.2, 0.75, 0.25, 0.3, 0.4, 0.8, 0.45, 0.5, 0.55, 0.6, 0.7, 0.85, 0.35, 0]:
-        # for speed in [0, 0.2, 0.6, 0.2, 0.6, 0]:
-        # for speed in [0, 0.2, 0]:
-            self.set_point_right_linear_velocity = speed
-            self.set_point_left_linear_velocity = speed
-            time.sleep(10)
-
-        self.stop_all_motors()
-
-    def reset_encoders_counter(self, timer):
-
-        if self.startup_flag  == 1:
-            for x in range(20):
-                right_pid_output = self.right_linear_velocity_pid.compute(0, 0.35, self.pid_timer_interval_s)
-                right_shifted_pid_pwm = right_pid_output + 5
-                right_output_pwm = round(right_shifted_pid_pwm / 10 * 900)  # mapping pid output to 0-900 pwm
-                right_output_pwm = max(min(right_output_pwm, 900), 0)  # capping the values at 900 pwm
-                self.right_pwm_from_pid = right_output_pwm
-
-                left_pid_output = self.left_linear_velocity_pid.compute(0, 0.35, self.pid_timer_interval_s)
-                left_shifted_pid_pwm = left_pid_output + 5
-                left_output_pwm = round(left_shifted_pid_pwm / 10 * 900)  # mapping pid output to 0-900 pwm
-                left_output_pwm = max(min(left_output_pwm, 900), 0)  # capping the values at 900 pwm
-                self.left_pwm_from_pid = left_output_pwm
-        else:
-            right_pid_output = self.right_linear_velocity_pid.compute(self.set_point_right_linear_velocity, self.right_linear_velocity,self.pid_timer_interval_s)
-            right_shifted_pid_pwm = right_pid_output + 5
-            right_output_pwm = round(right_shifted_pid_pwm / 10 * 900) # mapping pid output to 0-900 pwm
-            right_output_pwm = max(min(right_output_pwm, 900), 0) #capping the values at 900 pwm
-            self.right_pwm_from_pid = right_output_pwm
-
-            left_pid_output = self.left_linear_velocity_pid.compute(self.set_point_left_linear_velocity, self.left_linear_velocity,self.pid_timer_interval_s)
-            left_shifted_pid_pwm = left_pid_output + 5
-            left_output_pwm = round(left_shifted_pid_pwm / 10 * 900) # mapping pid output to 0-900 pwm
-            left_output_pwm = max(min(left_output_pwm, 900), 0) #capping the values at 900 pwm
-            self.left_pwm_from_pid = left_output_pwm
-
-        self.startup_flag = 0
+    def velocity_control(self, timer):
+        self.adjust_right_motor_velocity()
+        self.adjust_left_motor_velocity()
 
         temp_right_linear_velocity = self.calculate_linear_velocity(self.right_motors_encoders_counter)
         temp_left_linear_velocity = self.calculate_linear_velocity(self.left_motors_encoders_counter)
@@ -143,11 +89,10 @@ class MotorControl:
         self.left_linear_velocity = self.calculate_moving_average(self.left_linear_velocity_readings, temp_left_linear_velocity)
 
         print(f'{self.left_linear_velocity},   {self.right_linear_velocity}   ,{self.set_point_right_linear_velocity}, '
-              f'{self.right_pwm_from_pid},{self.set_point_right_linear_velocity},{self.right_linear_velocity},{right_pid_output}')
+              f'{self.right_pwm_from_pid},{self.set_point_right_linear_velocity},{self.right_linear_velocity}')
 
         self.set_motors_pwm('right', self.right_pwm_from_pid)
         self.set_motors_pwm('left', self.left_pwm_from_pid)
-
 
         self.right_motors_encoders_counter = 0
         self.left_motors_encoders_counter = 0
@@ -177,17 +122,9 @@ class MotorControl:
             motor_map[side][0].off()
             motor_map[side][1].off()
 
-    def stop_all_motors(self):
-        self.BIN1_right.off()
-        self.BIN2_right.off()
-        self.AIN1_left.off()
-        self.AIN2_left.off()
-        self.set_motors_pwm('right', 0)
-        self.set_motors_pwm('left', 0)
-
     def calculate_linear_velocity(self, encoder_counts):
         linear_displacement = self.wheels_circumference * (encoder_counts / self.encoder_PPR)
-        linear_velocity = linear_displacement / self.encoder_timer_interval_s
+        linear_velocity = linear_displacement / self.velocity_control_timer_interval_s
         return linear_velocity
 
     def calculate_moving_average(self, linear_velocity_list, current_linear_velocity_measurement):
@@ -197,13 +134,49 @@ class MotorControl:
 
         return round(sum(linear_velocity_list) / len(linear_velocity_list), 3)
 
-    # # set linear velocity of right motors from 0-1m/s
-    # def set_right_linear_velocity(self, velocity):
-    #     self.set_point_right_linear_velocity = velocity
-    #
-    # def set_left_linear_velocity(self, velocity):
-    #     self.set_point_left_linear_velocity = velocity
-    #
-    # def set_angular_velocity(self):
-    #     pass
+    def stop_all_motors(self):
+        self.BIN1_right.off()
+        self.BIN2_right.off()
+        self.AIN1_left.off()
+        self.AIN2_left.off()
+        self.set_motors_pwm('right', 0)
+        self.set_motors_pwm('left', 0)
 
+    def test_run(self):
+        self.stop_all_motors()
+        self.set_motors_direction('left', 'forward')
+        self.set_motors_direction('right', 'forward')
+
+        for speed in [0, 0.4, 0]:
+            self.set_point_right_linear_velocity = speed
+            self.set_point_left_linear_velocity = speed
+            time.sleep(5)
+
+        self.stop_all_motors()
+
+    def adjust_right_motor_velocity(self):
+        pid_output = self.right_linear_velocity_pid.compute(self.set_point_right_linear_velocity, self.right_linear_velocity, self.velocity_control_timer_interval_s)
+        shifted_pid_pwm = pid_output + 5
+        output_pwm = round(shifted_pid_pwm / 10 * 900)  # mapping pid output to 0-900 pwm
+        self.right_pwm_from_pid = max(min(output_pwm, 900), 0)  # capping the values at 900 pwm
+
+    def adjust_left_motor_velocity(self):
+        pid_output = self.left_linear_velocity_pid.compute(self.set_point_left_linear_velocity, self.left_linear_velocity, self.velocity_control_timer_interval_s)
+        shifted_pid_pwm = pid_output + 5
+        output_pwm = round(shifted_pid_pwm / 10 * 900)  # mapping pid output to 0-900 pwm
+        self.left_pwm_from_pid = max(min(output_pwm, 900), 0)  # capping the values at 900 pwm
+
+    def reset_pid_values(self):
+        # PIDs start at 450 pwm which causes the robot to jump, this function resets them to 0 after init.
+        for x in range(15):
+            self.right_linear_velocity_pid.compute(0, 0.35, self.velocity_control_timer_interval_s)
+            self.left_linear_velocity_pid.compute(0, 0.35, self.velocity_control_timer_interval_s)
+
+    def set_right_linear_velocity(self, velocity):
+        pass
+
+    def set_left_linear_velocity(self, velocity):
+        pass
+
+    def set_angular_velocity(self):
+        pass
