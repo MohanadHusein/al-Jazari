@@ -5,7 +5,7 @@ class INA219BIDR:
     POWER_MONITOR_I2C_ADDR = 0x42 # I2C address of the power monitor IC
     BUS_VOLTAGE_REG = 0x02 # bus voltage measurement register address
     BATT_EMPTY_VOLT = 9.6
-    BATT_FULL_VOLT = 12.26
+    BATT_FULL_VOLT = 12.4
 
     def __init__(self, i2c):
         self.i2c = i2c
