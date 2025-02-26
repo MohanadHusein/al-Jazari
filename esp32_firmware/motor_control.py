@@ -10,6 +10,7 @@ class MotorControl:
         self.min_pwm_val = 0
         self.encoder_PPR = 1320 # output shaft PPR (11PPR * 30 gear ratio * 4 quadrature encoders rise & fall)
         self.wheels_radius = 0.04 # m
+        self.wheel_base = 0.075
         self.wheels_circumference = 2 * math.pi * self.wheels_radius
         self.velocity_control_timer_interval = 50 # millisecond
         self.velocity_control_timer_interval_s = self.velocity_control_timer_interval / 1000 # convert to seconds
@@ -21,6 +22,7 @@ class MotorControl:
         self.right_linear_velocity = 0 # m/s
         self.left_linear_velocity = 0 # m/s
         self.robot_linear_velocity = 0 # m/s
+        self.linear_velocity_cal_val = 0.83
 
         self.set_point_right_linear_velocity = 0 # m/s
         self.set_point_left_linear_velocity = 0 # m/s
@@ -76,7 +78,7 @@ class MotorControl:
         print('finished initializing')
 
 
-        self.test_run()
+        # self.test_run()
 
     def velocity_control(self, timer):
         self.adjust_right_motor_velocity()
@@ -88,8 +90,14 @@ class MotorControl:
         self.right_linear_velocity = self.calculate_moving_average(self.right_linear_velocity_readings, temp_right_linear_velocity)
         self.left_linear_velocity = self.calculate_moving_average(self.left_linear_velocity_readings, temp_left_linear_velocity)
 
-        print(f'{self.left_linear_velocity},   {self.right_linear_velocity}   ,{self.set_point_right_linear_velocity}, '
-              f'{self.right_pwm_from_pid},{self.set_point_right_linear_velocity},{self.right_linear_velocity}')
+        # below pwm duty cycle of 50 the motors don't move and generate noise, clamping to zero.
+        if self.right_pwm_from_pid < 50:
+            self.right_pwm_from_pid = 0
+        if self.left_pwm_from_pid < 50:
+            self.left_pwm_from_pid = 0
+
+        # print(f'{self.left_linear_velocity},   {self.right_linear_velocity}   ,{self.set_point_right_linear_velocity}, '
+        #       f'{self.right_pwm_from_pid}, {self.left_pwm_from_pid},{self.set_point_right_linear_velocity},{self.left_linear_velocity},{self.right_linear_velocity}')
 
         self.set_motors_pwm('right', self.right_pwm_from_pid)
         self.set_motors_pwm('left', self.left_pwm_from_pid)
@@ -124,7 +132,7 @@ class MotorControl:
 
     def calculate_linear_velocity(self, encoder_counts):
         linear_displacement = self.wheels_circumference * (encoder_counts / self.encoder_PPR)
-        linear_velocity = linear_displacement / self.velocity_control_timer_interval_s
+        linear_velocity = (linear_displacement / self.velocity_control_timer_interval_s)  * self.linear_velocity_cal_val
         return linear_velocity
 
     def calculate_moving_average(self, linear_velocity_list, current_linear_velocity_measurement):
@@ -144,15 +152,19 @@ class MotorControl:
 
     def test_run(self):
         self.stop_all_motors()
-        self.set_motors_direction('left', 'forward')
-        self.set_motors_direction('right', 'forward')
+        self.set_left_linear_velocity(0.5)
+        self.set_right_linear_velocity(0.5)
+        time.sleep(4)
+        self.set_left_linear_velocity(0)
+        self.set_right_linear_velocity(0)
+        time.sleep(4)
+        self.set_left_linear_velocity(0.5)
+        self.set_right_linear_velocity(0.5)
+        time.sleep(4)
+        self.set_left_linear_velocity(0)
+        self.set_right_linear_velocity(0)
 
-        for speed in [0, 0.4, 0]:
-            self.set_point_right_linear_velocity = speed
-            self.set_point_left_linear_velocity = speed
-            time.sleep(5)
-
-        self.stop_all_motors()
+        # self.stop_all_motors()
 
     def adjust_right_motor_velocity(self):
         pid_output = self.right_linear_velocity_pid.compute(self.set_point_right_linear_velocity, self.right_linear_velocity, self.velocity_control_timer_interval_s)
@@ -168,15 +180,46 @@ class MotorControl:
 
     def reset_pid_values(self):
         # PIDs start at 450 pwm which causes the robot to jump, this function resets them to 0 after init.
-        for x in range(15):
+        for x in range(20):
             self.right_linear_velocity_pid.compute(0, 0.35, self.velocity_control_timer_interval_s)
             self.left_linear_velocity_pid.compute(0, 0.35, self.velocity_control_timer_interval_s)
 
-    def set_right_linear_velocity(self, velocity):
-        pass
+    def set_right_linear_velocity(self, velocity): # velocity in m/s -1 to 1
+        if -1 <= velocity <= 1:
+            if velocity < 0:
+                self.set_motors_direction('right', 'backward')
+                self.set_point_right_linear_velocity = abs(velocity)
+            elif velocity > 0:
+                self.set_motors_direction('right', 'forward')
+                self.set_point_right_linear_velocity = velocity
+            else:
+                self.set_point_right_linear_velocity = velocity
+        else:
+            print(f"velocity value should be between -1 and 1 m/s, chosen velocity is: {velocity}")
 
-    def set_left_linear_velocity(self, velocity):
-        pass
 
-    def set_angular_velocity(self):
-        pass
+    def set_left_linear_velocity(self, velocity): # velocity in m/s -1 to 1
+        if -1 <= velocity <= 1:
+            if velocity < 0:
+                self.set_motors_direction('left', 'backward')
+                self.set_point_left_linear_velocity = abs(velocity)
+            elif velocity > 0:
+                self.set_motors_direction('left', 'forward')
+                self.set_point_left_linear_velocity = velocity
+            else:
+                self.set_point_left_linear_velocity = velocity
+        else:
+            print(f"velocity value should be between -1 and 1 m/s, chosen velocity is: {velocity}")
+
+    # negative angular velocity robot turns clockwise
+    # positive angular velocity robot turns counterclockwise
+    def set_robot_velocity(self, linear_velocity, angular_velocity):
+        right_velocity = linear_velocity + (angular_velocity * self.wheel_base) / 2
+        left_velocity = linear_velocity - (angular_velocity * self.wheel_base) / 2
+
+        # Ensure velocities stay within allowed range (-1 to 1 m/s)
+        right_velocity = max(-1, min(1, right_velocity))
+        left_velocity = max(-1, min(1, left_velocity))
+
+        self.set_right_linear_velocity(right_velocity)
+        self.set_left_linear_velocity(left_velocity)
