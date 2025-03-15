@@ -19,10 +19,15 @@ class ICM20948:
     MAGNETO_XOUT_L = 0x11 # start address of magnetometer addresses (6 bytes range)
     INT_PIN_CFG = 0x0f # register for enabling bypass mode (enabling magnetometer)
     CTRL2 = 0x31 # Magnetometer measurement trigger register
+    ST2 = 0x18
 
     def __init__(self, i2c):
         self.i2c = i2c
         self.initialize_sensor()
+
+        self.gx_offset = -0.5661449
+        self.gy_offset = 0.2418015
+        self.gz_offset = 0.3001757
 
     def initialize_sensor(self):
         self.sel_reg_bank(0)
@@ -38,6 +43,8 @@ class ICM20948:
 
         self.sel_reg_bank(0)
         self.write_byte(self.ACCEL_GYRO_I2C_ADDR, self.INT_PIN_CFG, 0x02) # enable bypass (enabling magnetometer)
+        time.sleep(0.1)
+        self.write_byte(self.MAGNETO_I2C_ADDR, self.CTRL2, 0x08) # enable mag continuous reading mode
         time.sleep(0.1)
 
     def read_byte(self, address, reg_addr):
@@ -76,24 +83,25 @@ class ICM20948:
         raw_gyro_x = (raw_accel_gyro_data[6] << 8) | raw_accel_gyro_data[7] # combine high and low byte
         if raw_gyro_x > 32767: #convert from two's complement to signed value
             raw_gyro_x -= 65536
-        gyro_x = raw_gyro_x / gyro_scale_factor
+        gyro_x = (raw_gyro_x / gyro_scale_factor) - self.gx_offset
 
         raw_gyro_y = (raw_accel_gyro_data[8] << 8) | raw_accel_gyro_data[9] # combine high and low byte
         if raw_gyro_y > 32767: #convert from two's complement to signed value
             raw_gyro_y -= 65536
-        gyro_y = raw_gyro_y / gyro_scale_factor
+        gyro_y = (raw_gyro_y / gyro_scale_factor) - self.gy_offset
 
         raw_gyro_z = (raw_accel_gyro_data[10] << 8) | raw_accel_gyro_data[11] # combine high and low byte
         if raw_gyro_z > 32767: #convert from two's complement to signed value
             raw_gyro_z -= 65536
-        gyro_z = raw_gyro_z / gyro_scale_factor
+        gyro_z = (raw_gyro_z / gyro_scale_factor) - self.gz_offset
 
         return [accel_x, accel_y, accel_z, gyro_x,gyro_y ,gyro_z]
 
     def read_magnetometer(self):
         mag_scale_factor = 0.15
-        self.write_byte(self.MAGNETO_I2C_ADDR, self.CTRL2, 1)
+        # self.write_byte(self.MAGNETO_I2C_ADDR, self.CTRL2, 1)
         raw_magneto_data = self.read_bytes(self.MAGNETO_I2C_ADDR, self.MAGNETO_XOUT_L, 6)
+        self.read_byte(self.MAGNETO_I2C_ADDR, self.ST2) # ST2 register should be read after reading mag data
 
         raw_mag_x = (raw_magneto_data[1] << 8) | raw_magneto_data[0] # combine high and low byte
         if raw_mag_x > 32767: #convert from two's complement to signed value
@@ -112,9 +120,29 @@ class ICM20948:
 
         return magneto_x, magneto_y, magneto_z
 
-# # Example usage
+    def calibrate_gyro(self, samples=1000): # used to calibrate gyro bias
+        gx_offset, gy_offset, gz_offset = 0, 0, 0
+
+        for _ in range(samples):
+            _, _, _, gx, gy, gz = self.read_accel_gyro()
+            gx_offset += gx
+            gy_offset += gy
+            gz_offset += gz
+            time.sleep(0.002)  # 2ms delay
+
+        gx_offset /= samples
+        gy_offset /= samples
+        gz_offset /= samples
+
+        print(f"Gyro Bias: X={gx_offset}, Y={gy_offset}, Z={gz_offset}")
+
+        self.gx_offset = gx_offset
+        self.gy_offset = gy_offset
+        self.gz_offset = gz_offset
+
+# Example usage
 if __name__ == "__main__":
-    i2c = I2C(0, scl=Pin(33), sda=Pin(32), freq=400000)  # Adjust pins as needed
+    i2c = I2C(0, scl=Pin(33), sda=Pin(32), freq=400000)
     icm = ICM20948(i2c)
 
     while True:
@@ -123,6 +151,7 @@ if __name__ == "__main__":
 
         print(f"Accel_x: {accel_x} | Accel_y: {accel_y} | Accel_z: {accel_z} | "
               f"Gyro_x: {gyro_x} | Gyro_y: {gyro_y} | Gyro_z: {gyro_z} | "
-              f"Magneto_x: {gyro_x} | Magneto_y: {gyro_y} | Magneto_z: {gyro_z}")
+              f"Magneto_x: {mag_x} | Magneto_y: {mag_y} | Magneto_z: {mag_z}")
 
         time.sleep(0.1)
+
